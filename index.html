@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+  <meta charset="UTF-8" />
+  <title>Mini FIFA 3D - Three.js</title>
+  <style>
+    body { margin: 0; overflow: hidden; font-family: Arial; }
+    #hud {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      color: white;
+      background: rgba(0,0,0,0.5);
+      padding: 10px;
+      border-radius: 10px;
+    }
+    button {
+      margin-top: 5px;
+      padding: 5px 10px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+<div id="hud">
+  <div>Placar: <span id="score">0 - 0</span></div>
+  <button onclick="resetGame()">Reset</button>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+
+<script>
+let scene, camera, renderer;
+let player, ball;
+let velocity = new THREE.Vector3();
+let ballVelocity = new THREE.Vector3();
+let keys = {};
+let scoreA = 0, scoreB = 0;
+
+init();
+animate();
+
+function init() {
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x87ceeb);
+
+  camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+
+  renderer = new THREE.WebGLRenderer({antialias:true});
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  document.body.appendChild(renderer.domElement);
+
+  // Luz
+  const light = new THREE.DirectionalLight(0xffffff, 1);
+  light.position.set(10,20,10);
+  scene.add(light);
+
+  // Campo
+  const field = new THREE.Mesh(
+    new THREE.PlaneGeometry(50, 30),
+    new THREE.MeshStandardMaterial({color: 0x228B22})
+  );
+  field.rotation.x = -Math.PI / 2;
+  scene.add(field);
+
+  // Linhas simples
+  const lineMaterial = new THREE.LineBasicMaterial({color: 0xffffff});
+  const centerLine = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(0,0.01,-15),
+    new THREE.Vector3(0,0.01,15)
+  ]);
+  scene.add(new THREE.Line(centerLine, lineMaterial));
+
+  // Jogador (cubo)
+  player = new THREE.Mesh(
+    new THREE.BoxGeometry(1,2,1),
+    new THREE.MeshStandardMaterial({color: 0x0000ff})
+  );
+  player.position.y = 1;
+  scene.add(player);
+
+  // Bola
+  ball = new THREE.Mesh(
+    new THREE.SphereGeometry(0.5, 32, 32),
+    new THREE.MeshStandardMaterial({color: 0xffffff})
+  );
+  ball.position.set(0,0.5,0);
+  scene.add(ball);
+
+  // Balizas
+  createGoal(-24);
+  createGoal(24);
+
+  // Eventos teclado
+  window.addEventListener("keydown", e => keys[e.key.toLowerCase()] = true);
+  window.addEventListener("keyup", e => keys[e.key.toLowerCase()] = false);
+}
+
+function createGoal(x) {
+  const postMaterial = new THREE.MeshStandardMaterial({color: 0xffffff});
+
+  const post1 = new THREE.Mesh(new THREE.BoxGeometry(0.2,3,0.2), postMaterial);
+  const post2 = post1.clone();
+  const crossbar = new THREE.Mesh(new THREE.BoxGeometry(4,0.2,0.2), postMaterial);
+
+  post1.position.set(x,1.5,-2);
+  post2.position.set(x,1.5,2);
+  crossbar.position.set(x,3,-0);
+
+  scene.add(post1, post2, crossbar);
+}
+
+function animate() {
+  requestAnimationFrame(animate);
+
+  movePlayer();
+  updateBall();
+  checkGoal();
+  updateCamera();
+
+  renderer.render(scene, camera);
+}
+
+function movePlayer() {
+  let speed = 0.2;
+  if(keys["w"] || keys["arrowup"]) player.position.z -= speed;
+  if(keys["s"] || keys["arrowdown"]) player.position.z += speed;
+  if(keys["a"] || keys["arrowleft"]) player.position.x -= speed;
+  if(keys["d"] || keys["arrowright"]) player.position.x += speed;
+
+  // Chute simples
+  let dist = player.position.distanceTo(ball.position);
+  if(dist < 2) {
+    let dir = new THREE.Vector3().subVectors(ball.position, player.position).normalize();
+    ballVelocity.add(dir.multiplyScalar(0.1));
+  }
+}
+
+function updateBall() {
+  ballVelocity.y -= 0.01; // gravidade
+  ball.position.add(ballVelocity);
+
+  // chão
+  if(ball.position.y < 0.5) {
+    ball.position.y = 0.5;
+    ballVelocity.y *= -0.5;
+  }
+
+  // traves simples colisão
+  if(Math.abs(ball.position.x) > 24 && Math.abs(ball.position.z) < 3 && ball.position.y < 3) {
+    ballVelocity.x *= -0.8;
+  }
+
+  // atrito
+  ballVelocity.multiplyScalar(0.98);
+}
+
+function checkGoal() {
+  if(ball.position.x < -25 && Math.abs(ball.position.z) < 3) {
+    scoreB++;
+    updateScore();
+    resetBall();
+  }
+  if(ball.position.x > 25 && Math.abs(ball.position.z) < 3) {
+    scoreA++;
+    updateScore();
+    resetBall();
+  }
+}
+
+function updateScore() {
+  document.getElementById("score").innerText = scoreA + " - " + scoreB;
+}
+
+function resetBall() {
+  ball.position.set(0,0.5,0);
+  ballVelocity.set(0,0,0);
+}
+
+function resetGame() {
+  scoreA = 0;
+  scoreB = 0;
+  updateScore();
+  resetBall();
+  player.position.set(0,1,0);
+}
+
+function updateCamera() {
+  camera.position.x = player.position.x;
+  camera.position.y = player.position.y + 10;
+  camera.position.z = player.position.z + 10;
+  camera.lookAt(player.position);
+}
+</script>
+</body>
+</html>
