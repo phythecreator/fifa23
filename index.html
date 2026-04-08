@@ -1,196 +1,408 @@
 <!DOCTYPE html>
 <html lang="pt">
 <head>
-  <meta charset="UTF-8" />
-  <title>Mini FIFA 3D - Three.js</title>
-  <style>
-    body { margin: 0; overflow: hidden; font-family: Arial; }
-    #hud {
-      position: absolute;
-      top: 10px;
-      left: 10px;
-      color: white;
-      background: rgba(0,0,0,0.5);
-      padding: 10px;
-      border-radius: 10px;
-    }
-    button {
-      margin-top: 5px;
-      padding: 5px 10px;
-      cursor: pointer;
-    }
-  </style>
+    <meta charset="UTF-8">
+    <title>Protótipo Futebol 3D</title>
+    <style>
+        body { 
+            margin: 0; 
+            overflow: hidden; 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            background-color: #87CEEB;
+        }
+        #ui { 
+            position: absolute; 
+            top: 20px; 
+            left: 20px; 
+            color: white; 
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.7); 
+            z-index: 10; 
+            pointer-events: none; /* Deixa os cliques passarem para a tela 3D, exceto nos botões */
+        }
+        #score { 
+            font-size: 32px; 
+            font-weight: bold; 
+            margin-bottom: 15px; 
+        }
+        #controls {
+            font-size: 14px;
+            margin-bottom: 15px;
+            color: #ddd;
+        }
+        button { 
+            padding: 10px 25px; 
+            font-size: 16px; 
+            font-weight: bold;
+            cursor: pointer; 
+            background-color: #28a745; 
+            color: white; 
+            border: 2px solid white; 
+            border-radius: 8px; 
+            pointer-events: auto;
+            transition: background 0.2s;
+        }
+        button:hover { 
+            background-color: #218838; 
+        }
+    </style>
 </head>
 <body>
-<div id="hud">
-  <div>Placar: <span id="score">0 - 0</span></div>
-  <button onclick="resetGame()">Reset</button>
-</div>
+    <div id="ui">
+        <div id="score">Equipa A: 0 | Equipa B: 0</div>
+        <div id="controls">Controles: Setas / WASD para mover. Empurra a bola!</div>
+        <button id="resetBtn">Reset</button>
+    </div>
 
-<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+    <script async src="https://unpkg.com/es-module-shims@1.8.0/dist/es-module-shims.js"></script>
+    
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+            }
+        }
+    </script>
 
-<script>
-let scene, camera, renderer;
-let player, ball;
-let velocity = new THREE.Vector3();
-let ballVelocity = new THREE.Vector3();
-let keys = {};
-let scoreA = 0, scoreB = 0;
+    <script type="module">
+        import * as THREE from 'three';
 
-init();
-animate();
+        // --- 1. Configurações Iniciais da Cena ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x87CEEB); // Céu azul
+        scene.fog = new THREE.Fog(0x87CEEB, 30, 100); // Efeito de neblina para profundidade
 
-function init() {
-  scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x87ceeb);
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.body.appendChild(renderer.domElement);
 
-  camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+        // --- 2. Iluminação ---
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
 
-  renderer = new THREE.WebGLRenderer({antialias:true});
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  document.body.appendChild(renderer.domElement);
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+        dirLight.position.set(50, 100, 50);
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.width = 2048;
+        dirLight.shadow.mapSize.height = 2048;
+        dirLight.shadow.camera.top = 60;
+        dirLight.shadow.camera.bottom = -60;
+        dirLight.shadow.camera.left = -60;
+        dirLight.shadow.camera.right = 60;
+        scene.add(dirLight);
 
-  // Luz
-  const light = new THREE.DirectionalLight(0xffffff, 1);
-  light.position.set(10,20,10);
-  scene.add(light);
+        // --- 3. Materiais Globais ---
+        const grassMat = new THREE.MeshStandardMaterial({ color: 0x3b8526, roughness: 1 });
+        const lineMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+        const ballMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.2, metalness: 0.1 });
+        const playerMatBody = new THREE.MeshStandardMaterial({ color: 0xcc0000 });
+        const playerMatHead = new THREE.MeshStandardMaterial({ color: 0xffccaa });
+        const goalMat = new THREE.MeshStandardMaterial({ color: 0xeeeeee, metalness: 0.5 });
 
-  // Campo
-  const field = new THREE.Mesh(
-    new THREE.PlaneGeometry(50, 30),
-    new THREE.MeshStandardMaterial({color: 0x228B22})
-  );
-  field.rotation.x = -Math.PI / 2;
-  scene.add(field);
+        // --- 4. Construção do Campo ---
+        const fieldWidth = 60;
+        const fieldLength = 90;
+        
+        const ground = new THREE.Mesh(new THREE.PlaneGeometry(fieldWidth, fieldLength), grassMat);
+        ground.rotation.x = -Math.PI / 2;
+        ground.receiveShadow = true;
+        scene.add(ground);
 
-  // Linhas simples
-  const lineMaterial = new THREE.LineBasicMaterial({color: 0xffffff});
-  const centerLine = new THREE.BufferGeometry().setFromPoints([
-    new THREE.Vector3(0,0.01,-15),
-    new THREE.Vector3(0,0.01,15)
-  ]);
-  scene.add(new THREE.Line(centerLine, lineMaterial));
+        // Função auxiliar para desenhar linhas
+        function createLine(w, h, x, z) {
+            const line = new THREE.Mesh(new THREE.PlaneGeometry(w, h), lineMat);
+            line.rotation.x = -Math.PI / 2;
+            line.position.set(x, 0.02, z); // Ligeiramente acima do chão para evitar z-fighting
+            scene.add(line);
+        }
 
-  // Jogador (cubo)
-  player = new THREE.Mesh(
-    new THREE.BoxGeometry(1,2,1),
-    new THREE.MeshStandardMaterial({color: 0x0000ff})
-  );
-  player.position.y = 1;
-  scene.add(player);
+        // Linhas de campo
+        const lineWidth = 0.5;
+        createLine(fieldWidth, lineWidth, 0, 0); // Meio campo
+        createLine(fieldWidth, lineWidth, 0, fieldLength/2); // Linha de fundo A
+        createLine(fieldWidth, lineWidth, 0, -fieldLength/2); // Linha de fundo B
+        createLine(lineWidth, fieldLength, fieldWidth/2, 0); // Lateral
+        createLine(lineWidth, fieldLength, -fieldWidth/2, 0); // Lateral
+        // Círculo central
+        const centerCircle = new THREE.Mesh(
+            new THREE.RingGeometry(8, 8.5, 32),
+            new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide })
+        );
+        centerCircle.rotation.x = -Math.PI / 2;
+        centerCircle.position.y = 0.02;
+        scene.add(centerCircle);
 
-  // Bola
-  ball = new THREE.Mesh(
-    new THREE.SphereGeometry(0.5, 32, 32),
-    new THREE.MeshStandardMaterial({color: 0xffffff})
-  );
-  ball.position.set(0,0.5,0);
-  scene.add(ball);
+        // --- 5. Criação da Bola ---
+        const ballRadius = 0.6;
+        const ball = new THREE.Mesh(new THREE.SphereGeometry(ballRadius, 32, 32), ballMat);
+        ball.castShadow = true;
+        scene.add(ball);
+        
+        let ballVelocity = new THREE.Vector3(0, 0, 0);
 
-  // Balizas
-  createGoal(-24);
-  createGoal(24);
+        // --- 6. Criação do Jogador ---
+        const playerGroup = new THREE.Group();
+        
+        const body = new THREE.Mesh(new THREE.BoxGeometry(1.2, 2.2, 1), playerMatBody);
+        body.position.y = 1.1;
+        body.castShadow = true;
+        playerGroup.add(body);
+        
+        const head = new THREE.Mesh(new THREE.SphereGeometry(0.6, 16, 16), playerMatHead);
+        head.position.y = 2.8;
+        head.castShadow = true;
+        playerGroup.add(head);
+        
+        scene.add(playerGroup);
 
-  // Eventos teclado
-  window.addEventListener("keydown", e => keys[e.key.toLowerCase()] = true);
-  window.addEventListener("keyup", e => keys[e.key.toLowerCase()] = false);
-}
+        // --- 7. Construção das Balizas ---
+        const goalWidth = 12;
+        const goalHeight = 4;
+        const goalDepth = 3;
+        const goalPostsBoxes = []; // Usado para colisões
+        const goalsZones = []; // Áreas que contam golo
 
-function createGoal(x) {
-  const postMaterial = new THREE.MeshStandardMaterial({color: 0xffffff});
+        function createGoal(zPos, isTeamA) {
+            const group = new THREE.Group();
+            const postRadius = 0.15;
+            const postGeom = new THREE.CylinderGeometry(postRadius, postRadius, goalHeight, 16);
+            const barGeom = new THREE.CylinderGeometry(postRadius, postRadius, goalWidth + postRadius*2, 16);
 
-  const post1 = new THREE.Mesh(new THREE.BoxGeometry(0.2,3,0.2), postMaterial);
-  const post2 = post1.clone();
-  const crossbar = new THREE.Mesh(new THREE.BoxGeometry(4,0.2,0.2), postMaterial);
+            const leftPost = new THREE.Mesh(postGeom, goalMat);
+            leftPost.position.set(-goalWidth/2, goalHeight/2, 0);
+            leftPost.castShadow = true;
 
-  post1.position.set(x,1.5,-2);
-  post2.position.set(x,1.5,2);
-  crossbar.position.set(x,3,-0);
+            const rightPost = new THREE.Mesh(postGeom, goalMat);
+            rightPost.position.set(goalWidth/2, goalHeight/2, 0);
+            rightPost.castShadow = true;
 
-  scene.add(post1, post2, crossbar);
-}
+            const crossbar = new THREE.Mesh(barGeom, goalMat);
+            crossbar.rotation.z = Math.PI / 2;
+            crossbar.position.set(0, goalHeight, 0);
+            crossbar.castShadow = true;
 
-function animate() {
-  requestAnimationFrame(animate);
+            group.add(leftPost);
+            group.add(rightPost);
+            group.add(crossbar);
+            group.position.set(0, 0, zPos);
+            scene.add(group);
 
-  movePlayer();
-  updateBall();
-  checkGoal();
-  updateCamera();
+            // Caixas de colisão para os postes e barra
+            leftPost.updateMatrixWorld();
+            rightPost.updateMatrixWorld();
+            crossbar.updateMatrixWorld();
+            goalPostsBoxes.push(new THREE.Box3().setFromObject(leftPost));
+            goalPostsBoxes.push(new THREE.Box3().setFromObject(rightPost));
+            goalPostsBoxes.push(new THREE.Box3().setFromObject(crossbar));
 
-  renderer.render(scene, camera);
-}
+            // Zona de golo
+            goalsZones.push({
+                zLimit: zPos,
+                isTeamA: isTeamA,
+                minX: -goalWidth/2,
+                maxX: goalWidth/2
+            });
+        }
 
-function movePlayer() {
-  let speed = 0.2;
-  if(keys["w"] || keys["arrowup"]) player.position.z -= speed;
-  if(keys["s"] || keys["arrowdown"]) player.position.z += speed;
-  if(keys["a"] || keys["arrowleft"]) player.position.x -= speed;
-  if(keys["d"] || keys["arrowright"]) player.position.x += speed;
+        createGoal(fieldLength/2, false); // Baliza no fundo positivo (Golo da Equipa A)
+        createGoal(-fieldLength/2, true); // Baliza no fundo negativo (Golo da Equipa B)
 
-  // Chute simples
-  let dist = player.position.distanceTo(ball.position);
-  if(dist < 2) {
-    let dir = new THREE.Vector3().subVectors(ball.position, player.position).normalize();
-    ballVelocity.add(dir.multiplyScalar(0.1));
-  }
-}
+        // --- 8. Estado do Jogo e Controlos ---
+        let scoreA = 0;
+        let scoreB = 0;
+        const scoreEl = document.getElementById('score');
 
-function updateBall() {
-  ballVelocity.y -= 0.01; // gravidade
-  ball.position.add(ballVelocity);
+        const keys = { w: false, a: false, s: false, d: false, ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false };
 
-  // chão
-  if(ball.position.y < 0.5) {
-    ball.position.y = 0.5;
-    ballVelocity.y *= -0.5;
-  }
+        window.addEventListener('keydown', (e) => { 
+            if(keys.hasOwnProperty(e.key)) keys[e.key] = true; 
+        });
+        window.addEventListener('keyup', (e) => { 
+            if(keys.hasOwnProperty(e.key)) keys[e.key] = false; 
+        });
 
-  // traves simples colisão
-  if(Math.abs(ball.position.x) > 24 && Math.abs(ball.position.z) < 3 && ball.position.y < 3) {
-    ballVelocity.x *= -0.8;
-  }
+        document.getElementById('resetBtn').addEventListener('click', fullReset);
 
-  // atrito
-  ballVelocity.multiplyScalar(0.98);
-}
+        function resetPositions() {
+            playerGroup.position.set(0, 0, 15);
+            playerGroup.lookAt(0, 0, 0);
+            ball.position.set(0, ballRadius + 2, 0); // Larga a bola um pouco acima para quicar
+            ballVelocity.set(0, 0, 0);
+        }
 
-function checkGoal() {
-  if(ball.position.x < -25 && Math.abs(ball.position.z) < 3) {
-    scoreB++;
-    updateScore();
-    resetBall();
-  }
-  if(ball.position.x > 25 && Math.abs(ball.position.z) < 3) {
-    scoreA++;
-    updateScore();
-    resetBall();
-  }
-}
+        function fullReset() {
+            scoreA = 0;
+            scoreB = 0;
+            updateScoreUI();
+            resetPositions();
+        }
 
-function updateScore() {
-  document.getElementById("score").innerText = scoreA + " - " + scoreB;
-}
+        function updateScoreUI() {
+            scoreEl.innerText = `Equipa A: ${scoreA} | Equipa B: ${scoreB}`;
+        }
 
-function resetBall() {
-  ball.position.set(0,0.5,0);
-  ballVelocity.set(0,0,0);
-}
+        resetPositions();
 
-function resetGame() {
-  scoreA = 0;
-  scoreB = 0;
-  updateScore();
-  resetBall();
-  player.position.set(0,1,0);
-}
+        // --- 9. Motor de Física e Lógica (Update) ---
+        function updatePhysics(delta) {
+            // -- 9.1 Movimento do Jogador --
+            const speed = 18 * delta;
+            let moveDir = new THREE.Vector3(0,0,0);
+            
+            if (keys.w || keys.ArrowUp) moveDir.z -= 1;
+            if (keys.s || keys.ArrowDown) moveDir.z += 1;
+            if (keys.a || keys.ArrowLeft) moveDir.x -= 1;
+            if (keys.d || keys.ArrowRight) moveDir.x += 1;
 
-function updateCamera() {
-  camera.position.x = player.position.x;
-  camera.position.y = player.position.y + 10;
-  camera.position.z = player.position.z + 10;
-  camera.lookAt(player.position);
-}
-</script>
+            if (moveDir.length() > 0) {
+                moveDir.normalize();
+                playerGroup.position.addScaledVector(moveDir, speed);
+                
+                // Faz o jogador olhar na direção do movimento
+                const targetLook = playerGroup.position.clone().add(moveDir);
+                playerGroup.lookAt(targetLook);
+            }
+
+            // Limites do campo para o jogador (com paredes invisíveis)
+            playerGroup.position.x = THREE.MathUtils.clamp(playerGroup.position.x, -fieldWidth/2, fieldWidth/2);
+            playerGroup.position.z = THREE.MathUtils.clamp(playerGroup.position.z, -fieldLength/2, fieldLength/2);
+
+            // -- 9.2 Colisão Jogador - Bola (Mecânica de Chute) --
+            // Usamos a distância entre os centros (no eixo XZ)
+            const playerPosXZ = new THREE.Vector3(playerGroup.position.x, 0, playerGroup.position.z);
+            const ballPosXZ = new THREE.Vector3(ball.position.x, 0, ball.position.z);
+            const dist = playerPosXZ.distanceTo(ballPosXZ);
+            const kickThreshold = 1.8; // Raio efetivo do jogador + bola
+
+            if (dist < kickThreshold) {
+                // Direção do centro do jogador para a bola
+                const pushDir = new THREE.Vector3().subVectors(ballPosXZ, playerPosXZ).normalize();
+                
+                // Se estiver em movimento, dá um impulso mais forte (chute), senão só empurra
+                const hitPower = (moveDir.length() > 0) ? 1.2 : 0.5;
+                
+                ballVelocity.x += pushDir.x * hitPower;
+                ballVelocity.z += pushDir.z * hitPower;
+                
+                // Eleva a bola ligeiramente se for um chute forte
+                if(hitPower > 1.0) ballVelocity.y += 0.4; 
+                
+                // Afasta fisicamente para evitar penetração
+                const overlap = kickThreshold - dist;
+                ball.position.x += pushDir.x * overlap;
+                ball.position.z += pushDir.z * overlap;
+            }
+
+            // -- 9.3 Atualização da Bola (Gravidade e Atrito) --
+            const gravity = -0.04;
+            ballVelocity.y += gravity; 
+            
+            ball.position.add(ballVelocity);
+
+            // Colisão com o solo
+            if (ball.position.y < ballRadius) {
+                ball.position.y = ballRadius;
+                ballVelocity.y *= -0.7; // Coeficiente de restituição (Quique)
+                
+                // Atrito com a relva (só aplica quando está a tocar no chão)
+                ballVelocity.x *= 0.95; 
+                ballVelocity.z *= 0.95;
+                
+                // Para a bola completamente se a velocidade for muito baixa
+                if (Math.abs(ballVelocity.y) < 0.05) ballVelocity.y = 0;
+                if (Math.abs(ballVelocity.x) < 0.01) ballVelocity.x = 0;
+                if (Math.abs(ballVelocity.z) < 0.01) ballVelocity.z = 0;
+            } else {
+                // Resistência do ar mínima
+                ballVelocity.x *= 0.99;
+                ballVelocity.z *= 0.99;
+            }
+
+            // Rotação da bola baseada no movimento para realismo visual
+            ball.rotation.x += ballVelocity.z * 0.5;
+            ball.rotation.z -= ballVelocity.x * 0.5;
+
+            // -- 9.4 Colisão com Limites e Balizas --
+            // Colisão com laterais do campo
+            if (Math.abs(ball.position.x) > fieldWidth/2) {
+                ball.position.x = Math.sign(ball.position.x) * (fieldWidth/2);
+                ballVelocity.x *= -0.8; // Quica na lateral invisível
+            }
+
+            // Lógica de Golo e Limites de Fundo
+            if (Math.abs(ball.position.z) > fieldLength/2) {
+                const zSign = Math.sign(ball.position.z);
+                
+                // Verifica se a bola está dentro da largura e altura da baliza
+                if (Math.abs(ball.position.x) < goalWidth/2 && ball.position.y < goalHeight + ballRadius) {
+                    
+                    // Condição de golo: Passou a linha de golo
+                    if (Math.abs(ball.position.z) > (fieldLength/2 + ballRadius)) {
+                        if (zSign > 0) scoreA++; // Baliza no fundo positivo pertence à Equipa B, logo Equipa A marca
+                        else scoreB++;
+                        
+                        updateScoreUI();
+                        resetPositions(); // Repõe o jogo
+                        return; // Evita executar mais cálculos neste frame
+                    }
+                } else {
+                    // Bateu na parede de fundo fora da baliza (Linha de fundo)
+                    ball.position.z = zSign * (fieldLength/2);
+                    ballVelocity.z *= -0.8;
+                }
+            }
+
+            // Colisão com os postes físicos (usando Box3)
+            ball.updateMatrixWorld();
+            const ballBox = new THREE.Box3().setFromObject(ball);
+            for (let postBox of goalPostsBoxes) {
+                if (ballBox.intersectsBox(postBox)) {
+                    // Reação de colisão simples: Inverte e reduz velocidade
+                    // Para um protótipo complexo usaríamos reflexão de vetores normais
+                    ballVelocity.x *= -0.8;
+                    ballVelocity.z *= -0.8;
+                    
+                    // Prevenir bloqueio empurrando a bola no sentido oposto
+                    ball.position.x += ballVelocity.x;
+                    ball.position.z += ballVelocity.z;
+                }
+            }
+        }
+
+        // --- 10. Câmera e Loop de Renderização ---
+        const clock = new THREE.Clock();
+        const cameraOffset = new THREE.Vector3(0, 12, 20); // Altura e recuo da câmera (Terceira pessoa)
+
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            // Limitamos o delta para evitar problemas de física se a aba ficar inativa
+            const delta = Math.min(clock.getDelta(), 0.1); 
+
+            updatePhysics(delta);
+
+            // Suavização da câmera a seguir o jogador
+            const targetCameraPos = playerGroup.position.clone().add(cameraOffset);
+            camera.position.lerp(targetCameraPos, 0.05); // O fator 0.05 dita a suavidade (Lag)
+            
+            // A câmera olha para um ponto um pouco à frente do jogador para melhor visibilidade
+            const lookTarget = playerGroup.position.clone().add(new THREE.Vector3(0, 0, -5));
+            camera.lookAt(lookTarget);
+
+            renderer.render(scene, camera);
+        }
+
+        animate();
+
+        // --- 11. Ajuste de Janela (Resize) ---
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
 </body>
 </html>
